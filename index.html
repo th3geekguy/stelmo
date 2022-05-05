@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script type="text/javascript" src="dist/jszip.js"></script>
+</head>
+
+<body>
+
+    <h3>Choose the local(s) zip file(s)</h3>
+    <p class="note">Note : your browser will process the zip file, don't choose a file too big !</p>
+    <input type="file" id="file" name="file" multiple /><br />
+
+    <div id="result_block" class="hidden">
+        <h3>Content :</h3>
+        <div id="result"></div>
+    </div>
+
+    <div id="sd_table_div">
+    </div>
+
+    <script>
+        class Node {
+            hostname;
+            id;
+            role;
+            osVersion;
+            hypervisor;
+            avail;
+            state;
+            ip;
+            engver;
+            mkemsr;
+            collect;
+            orch;
+            createdUpdated;
+            statusMsg;
+            os;
+
+            constructor(node) { // json of node - "ucp-nodes.txt"
+                const na = 'N/A';
+
+                // Description
+                var desc = node.Description;
+                this.hostname = ('Hostname' in desc) ? desc.Hostname : na;
+                var arch = ('Architecture' in desc.Platform) ? desc.Platform.Architecture : na;
+                this.os = ('OS' in desc.Platform) ? desc.Platform.OS : na;
+                let os_details = fullOSDetails(this.hostname) ? (this.os == 'linux') : [na, '-'];
+                var os_string = os_details[0];
+                this.hypervisor = os_details[1];
+                this.engver = ('EngineVersion' in desc.Engine) ? desc.Engine.EngineVersion : na;
+
+                // Status
+                var status = node.Status;
+                this.state = status.State
+                var addr = ('Addr' in status) ? status.Addr : na;
+                this.statusMsg = ('Message' in status) ? status.Message : na;
+                this.statusMsg = this.statusMsg.replace('UCP', 'MKE').trim();
+
+                // Spec
+                var spec = node.Spec;
+                this.role = spec.Role;
+                this.avail = spec.Availability;
+                this.collect = spec["Labels"]["com.docker.ucp.access.label"];
+                var o_swarm = '-';
+                var o_kube = '-';
+                if ('com.docker.ucp.orchestrator.swarm' in spec.Labels && 
+                    spec.Labels['com.docker.ucp.orchestrator.swarm'] == 'true')
+                {
+                    o_swarm = 'swarm';
+                }
+                if ('com.docker.ucp.orchestrator.kubernetes' in spec.Labels && 
+                    spec.Labels['com.docker.ucp.orchestrator.kubernetes'] == 'true')
+                {
+                    o_swarm = 'kube';
+                }
+                this.orch = [o_swarm, o_kube].join('/');
+
+                // Manager Status
+                var m_stat = ('ManagerStatus' in node) ? node['ManagerStatus'] : "";
+                addr = (addr == '127.0.0.1' || addr == '0.0.0.0') ? m_stat['Addr'] : addr;
+                this.ip = addr.replace(':2377', '').trim();
+                this.role = (this.role == 'manager' && ('Leader' in m_stat) && m_stat['Leader'] == true) ? 'leader' : this.role;
+
+                // Other
+                this.id = node['ID'].slice(0, 10);
+                var created = node.CreatedAt.split('T')[0];
+                var updated = node.UpdatedAt.split('T')[0];
+                this.createdUpdated = [created, updated].join('/');
+            }
+
+            getVersions(text) {
+                osType = '-';
+                osVersion = '---';
+                dsiOS = "No Info " // docker system info result
+                fullOSText = osType + '-' + osVersion + '/' + dsiOS
+                hpv = 'None'
+
+                console.log("Version:", text);
+            }
+
+            getVersions_Old(json) {
+                var ucpver = '';
+                if ('com.docker.ucp.node-state-augmented.reconciler-ucp-version' in json.Labels)
+                {
+                    ucpver = json.Labels['com.docker.ucp.node-state-augmented.reconciler-ucp-version']
+                }
+                if ('com.docker.ucp.node-state-augmented')
+                {
+
+                }
+                //var ucpver = getddcver(hostname, 'ucp-proxy.txt', 'IMAGE_VERSION');
+                //var dtrver = getddcver(hostname, 'dtr-registry-*.txt', 'DTR_VERSION');
+                var dtrver = '';
+
+                if (dtrver != '-')
+                {
+                    role += '/MSR';
+                }
+                this.mkemsr = [ucpver, dtrver].join('/');
+            }
+        }
+
+        function createSDTable(nodes) {
+            var headers = ['Hostname', 'ID', 'Role', 'OS Version', 'HPVS', 'Avail', 'State', 'IP', 'MCR', 'MKE/MSR', 'Collect', 'Orch', 'Created/Updated', 'Status', 'OS']
+
+            var table = document.createElement('table');
+            var headerRow = document.createElement('tr');
+
+            headers.forEach(headerText => {
+                let header = document.createElement('th');
+                let textNode = document.createTextNode(headerText);
+                header.appendChild(textNode);
+                headerRow.appendChild(header);
+            })
+
+            table.appendChild(headerRow);
+
+            nodes.forEach(node => {
+                let row = document.createElement('tr');
+
+                Object.values(node).forEach(text => {
+                    let cell = document.createElement('td');
+                    let textNode = document.createTextNode(text);
+                    cell.appendChild(textNode);
+                    row.appendChild(cell);
+                })
+
+                table.appendChild(row);
+            });
+
+            document.querySelector('#sd_table_div').appendChild(table);
+        }
+
+        function fullOSDetails(hostname) {
+            return ['OS', 'hypervisor'];
+        }
+
+        function createNodeObjects(text) {
+            const sd = JSON.parse(text);
+
+            var nodes = []
+
+            for (let obj in sd) {
+                let node = sd[obj];
+
+                let n = new Node(node);
+                nodes.push(n);
+            }
+
+            return nodes;
+        }
+
+        var $result = $("#result");
+        $("#file").on("change", function(evt) {
+                    // remove content
+                    $result.html("");
+                    // be sure to show the results
+                    $("#result_block").removeClass("hidden").addClass("show");
+                    
+                    var nodes = [];
+
+                    // Closure to capture the file information.
+                    function handleFile(f) {
+                        var $title = $("<h4>", {
+                            text: f.name
+                        });
+                        var $fileContent = $("<ul>");
+                        $result.append($title);
+                        $result.append($fileContent);
+
+                        var dateBefore = new Date();
+                                    
+                        JSZip.loadAsync(f) // 1) read the Blob
+                            .then(function(zip) {
+                                    var dateAfter = new Date();
+                                    $title.append($("<span>", {
+                                        "class": "small",
+                                        text: " (loaded in " + (dateAfter - dateBefore) + "ms)"
+                                    }));
+
+                                    zip.forEach(function(relativePath, zipEntry) { // 2) print entries
+                                                //$fileContent.append($("<li>", {
+                                                //    text: zipEntry.name
+                                                //}));
+                                                if (zipEntry.name == "ucp-nodes.txt") {
+                                                    zipEntry.async('text').then(function(txt) {
+                                                            nodes = createNodeObjects(txt);
+                                                            createSDTable(nodes);
+                                                        })
+                                                    return false;
+                                                }
+                                            });
+
+                                    zip.forEach(function(relativePath, zipEntry) { // get versions
+
+                                                if (zipEntry.name.split('/').slice(-1)[0].includes("dsinfo.txt")) {
+                                                    var hostname = zipEntry.name.split('/').slice(-3)[0];
+                                                    console.log(nodes);
+                                                    nodes.forEach(node => {
+                                                        console.log(node.hostname, hostname);
+                                                        if (node.hostname == hostname)
+                                                        {
+                                                            zipEntry.async('text').then(function(txt) {
+                                                                node.getVersions(txt);
+                                                            })
+                                                        }
+                                                    })
+                                                }
+                                            });
+
+                                    },
+                                    function(e) {
+                                        $result.append($("<div>", {
+                                            "class": "alert alert-danger",
+                                            text: "Error reading " + f.name + ": " + e.message
+                                        }));
+                                    });
+                            }
+
+                    var files = evt.target.files;
+                    for (var i = 0; i < files.length; i++) {
+                        handleFile(files[i]);
+                    }
+                });
+    </script>
+</body>
+
+</html>
