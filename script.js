@@ -332,8 +332,6 @@ function processFile(file) {
                             return a.hostname > b.hostname ? 1 : -1;
                             });
 
-                        console.log(nodes);
-
                         createSDTable(nodes);
                         $ripple.hide();
                     })
