@@ -172,6 +172,7 @@ function createSDTable(nodes) {
     var headers = ['Hostname', 'ID', 'Role', 'OS Version', 'HPVS', 'Avail', 'State', 'IP', 'MCR', 'MKE/MSR', 'Collect', 'Orch', 'Created/Updated', 'OS', 'Status']
 
     var table = document.createElement('table');
+    table.setAttribute("id", "sd_table");
     var headerBody = document.createElement('thead');
     var headerRow = document.createElement('tr');
 
@@ -201,9 +202,18 @@ function createSDTable(nodes) {
     });
 
     table.appendChild(tableBody);
-    table.classList.add("styled-table");
-
+    //table.classList.add("styled-table");
+    table.classList.add("display");
+    table.classList.add("table");
+    table.classList.add("table-striped");
     document.querySelector('#sd_table_div').appendChild(table);
+    $('#sd_table').DataTable({
+        paging: false,
+        responsive: true,
+        columnDefs: [
+            { className: "compact" }
+        ]
+    });
 }
 
 function fullOSDetails(hostname) {
@@ -331,6 +341,8 @@ function processFile(file) {
                         nodes = nodes.sort(function(a, b) {
                             return a.hostname > b.hostname ? 1 : -1;
                             });
+
+                        //console.log(nodes);
 
                         createSDTable(nodes);
                         $ripple.hide();
